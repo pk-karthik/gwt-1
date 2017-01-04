@@ -1,5 +1,5 @@
 /*
- * Copyright 2011 Google Inc.
+ * Copyright 2016 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -13,29 +13,16 @@
  * License for the specific language governing permissions and limitations under
  * the License.
  */
-package com.google.gwt.sample.mobilewebapp.server.domain;
+package javaemul.internal.annotations;
 
-import com.googlecode.objectify.ObjectifyService;
-import com.googlecode.objectify.util.DAOBase;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Target;
 
 /**
- * Factory for creating EntityManager.
+ * An annotation to mark a method as unchecked to prevent the compiler from inserting casts on
+ * returns call sites due to erasure.
  */
-public final class EMF extends DAOBase {
-
-  private static EMF singleton;
-
-  static {
-    ObjectifyService.register(Task.class);
-  }
-
-  public static EMF get() {
-    if (singleton == null) {
-      singleton = new EMF();
-    }
-    return singleton;
-  }
-
-  protected EMF() {
-  }
+@Target(ElementType.METHOD)
+@CompilerHint
+public @interface UncheckedCast {
 }

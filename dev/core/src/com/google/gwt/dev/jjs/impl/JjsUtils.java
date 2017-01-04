@@ -32,6 +32,7 @@ import com.google.gwt.dev.jjs.ast.JConstructor;
 import com.google.gwt.dev.jjs.ast.JDeclaredType;
 import com.google.gwt.dev.jjs.ast.JDoubleLiteral;
 import com.google.gwt.dev.jjs.ast.JExpression;
+import com.google.gwt.dev.jjs.ast.JExpressionStatement;
 import com.google.gwt.dev.jjs.ast.JField;
 import com.google.gwt.dev.jjs.ast.JFloatLiteral;
 import com.google.gwt.dev.jjs.ast.JIntLiteral;
@@ -153,15 +154,22 @@ public class JjsUtils {
 
   /**
    * Creates a synthetic forwarding  stub in {@code type} with the same signature as
-   * {@code superTypeMethod} that dispatchs to that method..
+   * {@code superTypeMethod} that dispatchs to that method.
    */
   public static JMethod createForwardingMethod(JDeclaredType type,
       JMethod methodToDelegateTo) {
     JMethod forwardingMethod = createEmptyMethodFromExample(type, methodToDelegateTo, false);
     forwardingMethod.setForwarding();
 
-    if (methodToDelegateTo.isJsOverlay() && type.isJsNative()) {
-      forwardingMethod.isJsOverlay();
+    if (type.isJsNative()) {
+      if (methodToDelegateTo.isJsNative()) {
+        // Accidental override of native methods on native JsTypes are done by just redeclaring the
+        // native method.
+        return forwardingMethod;
+      }
+      // Otherwise the forwarding method is an overlay method with a proper body.
+      forwardingMethod.setJsOverlay();
+      forwardingMethod.setBody(new JMethodBody(methodToDelegateTo.getSourceInfo()));
     }
 
     // Create the forwarding body.
@@ -535,6 +543,107 @@ public class JjsUtils {
     emptyMethod.freezeParamTypes();
     inType.addMethod(emptyMethod);
     return emptyMethod;
+  }
+
+  /**
+   * Extracts the this(..) or super(..) call from a statement if the statement is of the expected
+   * form. Otherwise returns null.
+   */
+  public static JMethodCall getThisOrSuperConstructorCall(
+      JStatement statement) {
+    if (!(statement instanceof JExpressionStatement)) {
+      return null;
+    }
+
+    JExpressionStatement expressionStatement = (JExpressionStatement) statement;
+    if (!(expressionStatement.getExpr() instanceof JMethodCall)
+        || expressionStatement.getExpr() instanceof JNewInstance) {
+      return null;
+    }
+
+    JMethodCall call = (JMethodCall) expressionStatement.getExpr();
+    if (call.getTarget() instanceof JConstructor && call.isStaticDispatchOnly()) {
+      return call;
+    }
+    return null;
+  }
+
+  /**
+   * Returns the JsConstructor for a class or null if it does not have any.
+   */
+  public static JConstructor getJsConstructor(JDeclaredType type) {
+    return
+        FluentIterable
+            .from(type.getConstructors())
+            .filter(new Predicate<JConstructor>() {
+              @Override
+              public boolean apply(JConstructor constructor) {
+                return constructor.isJsConstructor();
+              }
+            }).first().orNull();
+  }
+
+  /**
+   * Returns the constructor which this constructor delegates or null if none.
+   */
+  public static JConstructor getDelegatedThisOrSuperConstructor(JConstructor constructor) {
+    JStatement contructorInvocaton = FluentIterable
+            .from(constructor.getBody().getStatements())
+            .filter(new Predicate<JStatement>() {
+              @Override
+              public boolean apply(JStatement statement) {
+                return getThisOrSuperConstructorCall(statement) != null;
+              }
+            }).first().orNull();
+
+    return contructorInvocaton != null
+        ? (JConstructor) getThisOrSuperConstructorCall(contructorInvocaton).getTarget()
+        : null;
+  }
+
+  /**
+   * Returns the constructor which all others delegate to if any, otherwise null.
+   */
+  public static JConstructor getPrimaryConstructor(final JDeclaredType type) {
+    List<JConstructor> delegatedSuperConstructors = FluentIterable
+        .from(type.getConstructors())
+        .filter(new Predicate<JConstructor>() {
+          @Override
+          public boolean apply(JConstructor constructor) {
+            // Calls super constructor.
+            return getDelegatedThisOrSuperConstructor(constructor).getEnclosingType() != type;
+          }
+        })
+        .limit(2)
+        .toList();
+    if (delegatedSuperConstructors.size() == 1) {
+      return delegatedSuperConstructors.get(0);
+    }
+    return null;
+  }
+
+  /**
+   * Returns the nearest native superclass of {@code type} if any, null otherwise.
+   */
+  public static JClassType getNativeSuperClassOrNull(JDeclaredType type) {
+    JClassType superClass = type.getSuperClass();
+    if (superClass == null || superClass.isJsNative()) {
+      return superClass;
+    }
+    return getNativeSuperClassOrNull(superClass);
+  }
+
+  /**
+   * Whether or not to use the JsName when implementing this member.
+   *
+   * <p>A member should only expose a JsName when a JsName has been assigned and the compilation
+   * has been configured to honor those names.
+   * */
+  public static boolean exposesJsName(JMember member) {
+    // JsFunction interfaces and  implementations do not have JsNames but canBeReferencedExternally
+    // or canBeImplementedExternally.
+    return member.getJsMemberType() != JsMemberType.NONE
+        && (member.canBeImplementedExternally() || member.canBeReferencedExternally());
   }
 
   private JjsUtils() {

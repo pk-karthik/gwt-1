@@ -146,13 +146,8 @@ public class JsFunctionTest extends GWTTestCase {
     assertNotNull(c2);
     ElementLikeNativeInterface i = (ElementLikeNativeInterface) createFunction();
     assertNotNull(i);
-    try {
-      MyJsFunctionInterfaceImpl c3 = (MyJsFunctionInterfaceImpl) createFunction();
-      assertNotNull(c3);
-      fail("ClassCastException should be caught.");
-    } catch (ClassCastException cce) {
-      // Expected.
-    }
+    MyJsFunctionInterfaceImpl c3 = (MyJsFunctionInterfaceImpl) createFunction();
+    assertNotNull(c3);
   }
 
   public void testCast_fromJsObject() {
@@ -213,7 +208,6 @@ public class JsFunctionTest extends GWTTestCase {
     assertTrue(object instanceof MyJsFunctionInterface);
     assertTrue(object instanceof MyJsFunctionIdentityInterface);
     assertTrue(object instanceof MyJsFunctionWithOnlyInstanceofReference);
-    assertFalse(object instanceof MyJsFunctionInterfaceImpl);
   }
 
   public void testInstanceOf_jsObject() {
@@ -221,13 +215,11 @@ public class JsFunctionTest extends GWTTestCase {
     assertFalse(object instanceof MyJsFunctionInterface);
     assertFalse(object instanceof MyJsFunctionIdentityInterface);
     assertFalse(object instanceof MyJsFunctionWithOnlyInstanceofReference);
-    assertFalse(object instanceof MyJsFunctionInterfaceImpl);
   }
 
   public void testInstanceOf_javaInstance() {
     Object object = new MyJsFunctionInterfaceImpl();
     assertTrue(object instanceof MyJsFunctionInterface);
-    assertTrue(object instanceof MyJsFunctionInterfaceImpl);
     assertTrue(object instanceof MyJsFunctionIdentityInterface);
     assertTrue(object instanceof MyJsFunctionWithOnlyInstanceofReference);
     assertFalse(object instanceof HTMLElementConcreteNativeJsType);
@@ -271,40 +263,17 @@ public class JsFunctionTest extends GWTTestCase {
     assertEquals(MyJsFunctionInterface.class, ((Object) createMyJsFunction()).getClass());
   }
 
-  public void testGetClassA() {
+  public void testInstanceField() {
 
     MyJsFunctionInterface jsfunctionImplementation =
         new MyJsFunctionInterface() {
+          String hello = new Object().getClass().getName();
           @Override
           public int foo(int a) {
-            return a;
+            return hello.length() + a;
           }
         };
-    assertEquals(MyJsFunctionInterface.class, ((Object) jsfunctionImplementation).getClass());
-  }
-
-  public void testGetClassB() {
-
-    MyJsFunctionInterface jsfunctionImplementation =
-        new MyJsFunctionInterface() {
-          @Override
-          public int foo(int a) {
-            return a;
-          }
-        };
-    assertEquals(MyJsFunctionInterface.class, createMyJsFunction().getClass());
-  }
-
-  public void testGetClassC() {
-
-    MyJsFunctionInterface jsfunctionImplementation =
-        new MyJsFunctionInterface() {
-          @Override
-          public int foo(int a) {
-            return a;
-          }
-        };
-    assertEquals(MyJsFunctionInterface.class, ((Object) createMyJsFunction()).getClass());
+    assertEquals(Object.class.getName().length() + 4, jsfunctionImplementation.foo(4));
   }
 
   // uncomment when Java8 is supported.

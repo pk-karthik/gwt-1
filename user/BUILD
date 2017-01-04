@@ -25,7 +25,7 @@ package(
     ],
 )
 
-subinclude("//third_party/java_src/gwt:build-macros")
+load("//third_party/java_src/gwt:build-macros.bzl", "AugmentedJar")
 
 # The classes in gwt-user.jar that GWT applications can depend on.
 # We want the final output of this NOT to depend on gwt-dev,
@@ -47,7 +47,6 @@ AugmentedJar(
     dojarjar = 1,
     exclude_glob = [
         "**/package.html",
-        "**/package-info.java",
         "src/com/google/gwt/junit/**",
         "super/com/google/gwt/junit/**",
     ],
@@ -67,12 +66,17 @@ java_library(
         ],
         exclude = [
             "src/com/google/gwt/junit/**/*.java",  # see gwt-testing
+            "**/ConsoleLogger.java",  # relies on internal APIs
+            "**/SuperDevModeLogger.java",  # relies on ConsoleLogger
             "**/EmulatedCharset.java",
-            "**/HashCodes.java", # relies on java8 only APIs
+            "**/HashCodes.java",  # relies on java8 only APIs
             "**/RunStyleSelenium.java",
         ],
     ),
     compatible_with = ["//buildenv/target:appengine"],
+    plugins = [
+        "//java/com/google/devtools/build/buildjar/plugin/gwt",
+    ],
     deps = [
         "//third_party/java_src/gwt/svn/tools:dev_deps",
         "//third_party/java_src/gwt/svn/tools:servlet_api_3",
@@ -106,6 +110,7 @@ java_library(
         "src/com/google/gwt/core/shared/GwtIncompatible.java",
         "src/com/google/gwt/user/server/Base64Utils.java",
     ],
+    compatible_with = ["//buildenv/target:appengine"],
     deps = [
         "//third_party/java_src/gwt/svn/trunk/dev:requestfactory-apt-deps",
     ],
@@ -127,7 +132,6 @@ AugmentedJar(
     dojarjar = 1,
     exclude_glob = [
         "**/package.html",
-        "**/package-info.java",
     ],
     java_library_name = "autobean-classes",
     output_name = "autobean-classes-src.jar",
@@ -187,19 +191,17 @@ AugmentedJar(
     dojarjar = 1,
     exclude_glob = [
         "**/package.html",
-        "**/package-info.java",
     ],
     output_name = "incremental-build-system-test-res.jar",
     wrap_javalibrary = 0,
 )
 
+JVM_REGEXP_SRCS = glob(["src/com/google/gwt/regexp/shared/*.java"])
+
 # See //third_party/java/gwt:regexp
 java_library(
     name = "jvm_regexp",
-    srcs = glob(
-        ["src/com/google/gwt/regexp/shared/*.java"],
-        exclude = ["**/package-info.java"],
-    ),
+    srcs = JVM_REGEXP_SRCS,
     compatible_with = [
         "//buildenv/target:android",
         "//buildenv/target:appengine",
@@ -215,7 +217,6 @@ java_library(
             "src/org/hibernate/validator/**/*_CustomFieldSerializer.java",
             "src/org/hibernate/validator/engine/ValidationSupport.java",
         ],
-        exclude = ["**/package-info.java"],
     ),
     deps = [
         "//third_party/java/hibernate:validator",
@@ -223,6 +224,17 @@ java_library(
         "//third_party/java_src/gwt:gwt-servlet",
     ],
 )
+
+DTO_SRCS = [
+    "src/com/google/gwt/user/client/rpc/CustomFieldSerializer.java",
+    "src/com/google/gwt/user/client/rpc/GwtTransient.java",
+    "src/com/google/gwt/user/client/rpc/IsSerializable.java",
+    "src/com/google/gwt/user/client/rpc/SerializationException.java",
+    "src/com/google/gwt/user/client/rpc/SerializationStreamReader.java",
+    "src/com/google/gwt/user/client/rpc/SerializationStreamWriter.java",
+] + glob([
+    "src/com/google/gwt/user/client/rpc/core/java/util/*.java",
+])
 
 # The indirection through libgwt-servlet-impl.jar is needed so that Java symbols in the outputs of
 # this package are distributed in one form (through the class jars, as AugmentedJar does)
@@ -250,12 +262,9 @@ java_library(
             "src/com/google/gwt/canvas/dom/client/*.java",
             "src/com/google/gwt/debug/client/DebugInfo.java",
             "src/com/google/gwt/media/dom/client/*.java",
-            "src/com/google/gwt/user/client/rpc/core/**/*CustomFieldSerializer*.java",
-            "src/com/google/gwt/user/client/rpc/core/java/util/*.java",
+            "src/com/google/gwt/user/client/rpc/core/**/*.java",
             "src/com/google/gwt/user/client/rpc/SerializedTypeViolationException.java",
             "src/com/google/gwt/user/client/rpc/IncompatibleRemoteServiceException.java",
-            "src/com/google/gwt/user/client/rpc/IsSerializable.java",
-            "src/com/google/gwt/user/client/rpc/GwtTransient.java",
             "src/com/google/gwt/user/client/rpc/RemoteService.java",
             "src/com/google/gwt/user/client/rpc/AsyncCallback.java",
             "src/com/google/gwt/user/client/rpc/RemoteServiceRelativePath.java",
@@ -295,9 +304,6 @@ java_library(
             "src/com/google/gwt/xhr/client/ReadyStateChangeHandler.java",
             "src/com/google/gwt/xhr/client/XMLHttpRequest.java",
             "src/com/google/gwt/user/client/Timer.java",
-            "src/com/google/gwt/user/client/rpc/SerializationException.java",
-            "src/com/google/gwt/user/client/rpc/SerializationStreamReader.java",
-            "src/com/google/gwt/user/client/rpc/SerializationStreamWriter.java",
             "src/com/google/gwt/user/client/rpc/impl/ClientSerializationStreamWriter.java",
             "src/com/google/gwt/user/client/rpc/impl/Serializer.java",
             # ...which need:
@@ -374,12 +380,13 @@ java_library(
         ],
         exclude = [
             "**/junit/**",
-            "**/package-info.java",
             "src/com/google/web/bindery/requestfactory/server/RequestFactoryJarExtractor.java",
-        ],
+        ] + DTO_SRCS + JVM_REGEXP_SRCS,
     ),
     compatible_with = ["//buildenv/target:appengine"],
     deps = [
+        ":gwt-dto-serializers",
+        ":jvm_regexp",
         "//third_party/java/servlet/servlet_api",
         "//third_party/java_src/gwt/svn/tools:servlet_deps",
         "//third_party/java_src/gwt/svn/trunk/dev:compiler.standalone.super",
@@ -395,17 +402,7 @@ java_library(
 # and common/collect:collect-gwt.  You really don't want it to be big!
 java_library(
     name = "gwt-dto-serializers",
-    srcs = [
-        "src/com/google/gwt/user/client/rpc/CustomFieldSerializer.java",
-        "src/com/google/gwt/user/client/rpc/GwtTransient.java",
-        "src/com/google/gwt/user/client/rpc/IsSerializable.java",
-        "src/com/google/gwt/user/client/rpc/SerializationException.java",
-        "src/com/google/gwt/user/client/rpc/SerializationStreamReader.java",
-        "src/com/google/gwt/user/client/rpc/SerializationStreamWriter.java",
-        "src/com/google/gwt/user/client/rpc/core/java/util/Collections.java",
-    ] + glob([
-        "src/com/google/gwt/user/client/rpc/core/java/util/*_CustomFieldSerializer*.java",
-    ]),
+    srcs = DTO_SRCS,
     compatible_with = [
         "//buildenv/target:android",
         "//buildenv/target:appengine",
@@ -444,10 +441,10 @@ AugmentedJar(
         "src": ["src/com/google/gwt/junit/**"],
         "super": ["super/com/google/gwt/junit/**"],
     },
+    compatible_with = ["//buildenv/target:appengine"],
     dojarjar = 1,
     exclude_glob = [
         "**/package.html",
-        "**/package-info.java",
         "**/RunStyleSelenium.java",
     ],
 )
@@ -464,6 +461,7 @@ java_library(
             "**/RunStyleSelenium.java",
         ],
     ),
+    compatible_with = ["//buildenv/target:appengine"],
     deps = [
         ":gwt-user-bare",
         "//third_party/java/junit",
@@ -471,18 +469,6 @@ java_library(
         "//third_party/java_src/gwt/svn/tools:servlet_api_3",
         "//third_party/java_src/gwt/svn/trunk/dev:compiler.standalone.super",
         "//third_party/java_src/gwt/svn/trunk/dev:gwt-dev-bare",
-    ],
-)
-
-# A minimal library for annotations that might be used by client code.
-java_library(
-    name = "gwt-user-interop-annotations",
-    srcs = [
-        "src/com/google/gwt/core/shared/GwtIncompatible.java",
-    ],
-    compatible_with = ["//buildenv/target:android"],
-    constraints = [
-        "android",
     ],
 )
 
@@ -530,6 +516,11 @@ AugmentedJar(
         "//third_party/java_src/gwt:gwt-dev",  # for the post-jarjar names
         "//third_party/java_src/gwt:gwt-testing",
         "//third_party/java_src/gwt/svn/trunk/dev:dev-test-code",
+    ],
+    javacopts = [
+        "-Xep:SelfComparison:OFF",  # go/self-comparison-lsc
+        "-Xep:SelfEquals:OFF",  # go/self-equals-lsc
+        "-Xep:IdentityBinaryExpression:OFF",
     ],
     deps = [
         "//third_party/java/jsr305_annotations",
@@ -679,7 +670,6 @@ filegroup(
         exclude = [
             "test/**/java8/**",
             "test/**/*Java8Suite.java",
-            "**/package-info.java",
         ],
     ),
     visibility = ["//third_party/java_src/j2cl:__subpackages__"],

@@ -15,6 +15,8 @@
  */
 package com.google.gwt.emultest.java.util;
 
+import com.google.gwt.junit.DoNotRunWith;
+import com.google.gwt.junit.Platform;
 import com.google.gwt.junit.client.GWTTestCase;
 
 import java.util.Comparator;
@@ -32,6 +34,7 @@ public class ObjectsTest extends GWTTestCase {
 
   public void testCompare() {
     Comparator<Integer> intComparator = new Comparator<Integer>() {
+      @SuppressWarnings("NumberEquality")
       @Override
       public int compare(Integer a, Integer b) {
         if (a == b) {
@@ -60,10 +63,16 @@ public class ObjectsTest extends GWTTestCase {
     assertTrue(Objects.deepEquals(null, null));
     assertFalse(Objects.deepEquals(null, "not null"));
     assertFalse(Objects.deepEquals("not null", null));
+    assertTrue(Objects.deepEquals(new Integer("1234"), new Integer(1234)));
     assertFalse(Objects.deepEquals(new Object(), new Object()));
 
     Object obj = new Object();
     assertTrue(Objects.deepEquals(obj, obj));
+
+    assertFalse(Objects.deepEquals(new int[]{1}, new double[]{1}));
+    assertFalse(Objects.deepEquals(new int[0], new double[0]));
+    assertTrue(Objects.deepEquals((Object) new Object[]{"a"}, (Object) new String[]{"a"}));
+    assertTrue(Objects.deepEquals((Object) new String[]{"a"}, (Object) new Object[]{"a"}));
 
     int[] intArray1 = new int[] { 2, 3, 5};
     int[] intArray2 = new int[] { 3, 1};
@@ -72,12 +81,19 @@ public class ObjectsTest extends GWTTestCase {
     assertFalse(Objects.deepEquals(intArray2, intArray3));
     assertTrue(Objects.deepEquals(intArray1, intArray1));
     assertTrue(Objects.deepEquals(intArray1, intArray3));
+
+    assertTrue(Objects.deepEquals(new int[][]{new int[]{1}}, new int[][]{new int[]{1}}));
+    assertFalse(Objects.deepEquals(new int[][]{new int[]{1}}, new double[][]{new double[]{1}}));
   }
 
+  @DoNotRunWith(Platform.Devel) // Objects.equals(String, String)
   public void testEquals() {
     assertTrue(Objects.equals(null, null));
     assertFalse(Objects.equals(null, "not null"));
     assertFalse(Objects.equals("not null", null));
+    assertTrue(Objects.equals("a", "a"));
+    assertFalse(Objects.equals("a", "b"));
+
     assertFalse(Objects.equals(new Object(), new Object()));
 
     Object obj = new Object();

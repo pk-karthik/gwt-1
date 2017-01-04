@@ -25,6 +25,7 @@ import javaemul.internal.annotations.DoNotInline;
 import jsinterop.annotations.JsFunction;
 import jsinterop.annotations.JsOverlay;
 import jsinterop.annotations.JsPackage;
+import jsinterop.annotations.JsProperty;
 import jsinterop.annotations.JsType;
 
 /**
@@ -208,14 +209,22 @@ public class NativeJsTypeTest extends GWTTestCase {
     public final Object getObject() {
       return object;
     }
+
+    static {
+      clinitCalled++;
+    }
   }
+
+  private static int clinitCalled = 0;
 
   public void testNativeJsTypeWithStaticIntializer() {
     assertEquals(new Integer(3), NativeJsTypeWithStaticInitializationAndFieldAccess.object);
+    assertEquals(0, clinitCalled);
     assertEquals(
         new Integer(4), NativeJsTypeWithStaticInitializationAndStaticOverlayMethod.getObject());
      assertEquals(new Integer(5),
          new NativeJsTypeWithStaticInitializationAndInstanceOverlayMethod().getObject());
+    assertEquals(1, clinitCalled);
   }
 
   @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Function")
@@ -373,5 +382,112 @@ public class NativeJsTypeTest extends GWTTestCase {
 
   public void testUnreferencedNativeArrayInstanceOf() {
     assertTrue(createArray() instanceof UnreferencedNativeType[]);
+  }
+
+  @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
+  interface NativeInterface {
+    void add(String element);
+  }
+
+  @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
+  static class NativeSuperClass {
+    public native void add(String element);
+    public native boolean remove(String element);
+  }
+
+  @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
+  static class NativeSubClassAccidentalOverride
+      extends NativeSuperClass implements NativeInterface {
+  }
+
+  public native NativeSubClassAccidentalOverride createNativeSubclass() /*-{
+    return {
+        add:
+            function(e) {
+              this[0] = e;
+            },
+        remove:
+            function(e) {
+              var ret = this[0] == e;
+              this[0] = undefined;
+              return ret;
+            }
+      };
+  }-*/;
+
+  public void testForwaringMethodsOnNativeClasses() {
+    NativeSubClassAccidentalOverride subClass = createNativeSubclass();
+    subClass.add("Hi");
+    assertTrue(subClass.remove("Hi"));
+    assertFalse(subClass.remove("Hi"));
+  }
+
+  @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Object")
+  static class NativeClassWithStaticOverlayFields {
+    @JsOverlay
+    static String uninitializedString;
+    @JsOverlay
+    static int uninitializedInt;
+    @JsOverlay
+    static int initializedInt = 5;
+  }
+
+  public void testUninitializedStaticOverlayField() {
+    assertEquals(0, NativeClassWithStaticOverlayFields.uninitializedInt);
+    assertEquals(5, NativeClassWithStaticOverlayFields.initializedInt);
+    assertNull(NativeClassWithStaticOverlayFields.uninitializedString);
+  }
+
+  @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "window")
+  private static class MainWindow {
+    public static Object window;
+  }
+
+  // <window> is a special qualifier that allows referencing the iframe window instead of the main
+  // window.
+  @JsType(isNative = true, namespace = "<window>", name = "window")
+  private static class IFrameWindow {
+    public static Object window;
+  }
+
+  @JsType(isNative = true)
+  private static class AlsoMainWindow {
+    @JsProperty(namespace = JsPackage.GLOBAL)
+    public static Object window;
+  }
+
+  @JsType(isNative = true)
+  private static class AlsoIFrameWindow {
+    @JsProperty(namespace = "<window>")
+    public static Object window;
+  }
+
+  public void testMainWindowIsNotIFrameWindow() {
+    assertSame(IFrameWindow.window, AlsoIFrameWindow.window);
+    assertNotSame(AlsoIFrameWindow.window, AlsoMainWindow.window);
+    assertNotSame(IFrameWindow.window, MainWindow.window);
+    assertSame(MainWindow.window, AlsoMainWindow.window);
+  }
+
+  @JsType(isNative = true, namespace = JsPackage.GLOBAL, name = "Error")
+  private static class NativeError {
+    public String message;
+  }
+
+  private static final String ERROR_FROM_NATIVE_ERROR_SUBCLASS = "error from NativeErrorSubclass";
+
+  private static class NativeErrorSubclass extends NativeError {
+    public NativeErrorSubclass() {
+      message = ERROR_FROM_NATIVE_ERROR_SUBCLASS;
+    }
+  }
+
+  public void testObjectPropertiesAreCopied() {
+    Object error = new NativeErrorSubclass();
+    assertTrue(error instanceof NativeError);
+    // Make sure the subclass is a proper Java object (the typeMarker should be one of the
+    // properties copied from java.lang.Object).
+    assertFalse(error instanceof JavaScriptObject);
+    assertTrue(error.toString().contains(ERROR_FROM_NATIVE_ERROR_SUBCLASS));
   }
 }

@@ -71,6 +71,7 @@ import com.google.gwt.dev.jjs.impl.ComputeExhaustiveCastabilityInformation;
 import com.google.gwt.dev.jjs.impl.ControlFlowAnalyzer;
 import com.google.gwt.dev.jjs.impl.ControlFlowRecorder;
 import com.google.gwt.dev.jjs.impl.DeadCodeElimination;
+import com.google.gwt.dev.jjs.impl.DevirtualizeDefaultMethodForwarding;
 import com.google.gwt.dev.jjs.impl.Devirtualizer;
 import com.google.gwt.dev.jjs.impl.EnumNameObfuscator;
 import com.google.gwt.dev.jjs.impl.EnumOrdinalizer;
@@ -105,7 +106,7 @@ import com.google.gwt.dev.jjs.impl.Pruner;
 import com.google.gwt.dev.jjs.impl.RecordRebinds;
 import com.google.gwt.dev.jjs.impl.RemoveEmptySuperCalls;
 import com.google.gwt.dev.jjs.impl.RemoveSpecializations;
-import com.google.gwt.dev.jjs.impl.ReplaceDefenderMethodReferences;
+import com.google.gwt.dev.jjs.impl.ReplaceCallsToNativeJavaLangObjectOverrides;
 import com.google.gwt.dev.jjs.impl.ReplaceGetClassOverrides;
 import com.google.gwt.dev.jjs.impl.ResolvePermutationDependentValues;
 import com.google.gwt.dev.jjs.impl.ResolveRuntimeTypeReferences;
@@ -327,9 +328,6 @@ public final class JavaToJavaScriptCompiler {
       // TODO(stalcup): hide metrics gathering in a callback or subclass
       logger.log(TreeLogger.INFO, "Compiling permutation " + permutationId + "...");
 
-      // Rewrite calls to from boxed constructor types to specialized unboxed methods
-      RewriteConstructorCallsForUnboxedTypes.exec(jprogram);
-
       // (2) Transform unresolved Java AST to resolved Java AST
       ResolvePermutationDependentValues
           .exec(jprogram, properties, permutation.getPropertyAndBindingInfos());
@@ -349,6 +347,9 @@ public final class JavaToJavaScriptCompiler {
       // constants) and 2) after all normalizations to collect synthetic references (e.g. to
       // record references to runtime classes like LongLib).
       maybeRecordReferencesAndControlFlow(false);
+
+      // Rewrite calls to from boxed constructor types to specialized unboxed methods
+      RewriteConstructorCallsForUnboxedTypes.exec(jprogram);
 
       // Replace compile time constants by their values.
       // TODO(rluble): eventually move to normizeSemantics.
@@ -1150,8 +1151,10 @@ public final class JavaToJavaScriptCompiler {
       EnumNameObfuscator.exec(jprogram, logger, configurationProperties, options);
 
       // (3) Normalize the unresolved Java AST
-      // Replace defender method references
-      ReplaceDefenderMethodReferences.exec(jprogram);
+      // Replace default methods by static implementations.
+      DevirtualizeDefaultMethodForwarding.exec(jprogram);
+      // Replace calls to native overrides of object methods.
+      ReplaceCallsToNativeJavaLangObjectOverrides.exec(jprogram);
 
       FixAssignmentsToUnboxOrCast.exec(jprogram);
       if (options.isEnableAssertions()) {

@@ -15,8 +15,10 @@
  */
 package com.google.gwt.emultest;
 
+import com.google.gwt.emultest.java.util.ArrayDequeTest;
 import com.google.gwt.emultest.java.util.ArrayListTest;
 import com.google.gwt.emultest.java.util.ArraysTest;
+import com.google.gwt.emultest.java.util.BitSetTest;
 import com.google.gwt.emultest.java.util.CollectionsTest;
 import com.google.gwt.emultest.java.util.ComparatorTest;
 import com.google.gwt.emultest.java.util.DateTest;
@@ -47,8 +49,10 @@ public class CollectionsSuite {
     GWTTestSuite suite = new GWTTestSuite("Tests for emulation of Java Collections");
 
     // $JUnit-BEGIN$
+    suite.addTestSuite(ArrayDequeTest.class);
     suite.addTestSuite(ArrayListTest.class);
     suite.addTestSuite(ArraysTest.class);
+    suite.addTestSuite(BitSetTest.class);
     suite.addTestSuite(CollectionsTest.class);
     suite.addTestSuite(ComparatorTest.class);
     suite.addTestSuite(DateTest.class);

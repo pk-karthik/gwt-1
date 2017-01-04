@@ -132,7 +132,10 @@ public class JavaScriptObject {
    */
   @Override
   public final boolean equals(Object other) {
-    return super.equals(other);
+    if (!GWT.isClient()) {
+      return super.equals(other);
+    }
+    return hasEquals(this) ? callEquals(this, other) : super.equals(other);
   }
 
   /**
@@ -140,14 +143,15 @@ public class JavaScriptObject {
    * underlying JavaScript object. Do not call this method on non-modifiable
    * JavaScript objects.
    *
-   * TODO: if the underlying object defines a 'hashCode' method maybe use that?
-   *
    * @return the hash code of the object
    */
   @Override
   public final int hashCode() {
-    return super.hashCode();
-  }
+    if (!GWT.isClient()) {
+      return super.hashCode();
+    }
+    return hasHashCode(this) ? callHashCode(this) : super.hashCode();
+  };
 
   /**
    * Call the toSource() on the JSO.
@@ -169,4 +173,20 @@ public class JavaScriptObject {
     return JavaScriptObject.class.desiredAssertionStatus() ?
         toStringVerbose(this) : toStringSimple(this);
   }
+
+  private static native boolean hasEquals(Object object) /*-{
+    return !!object && !!object.equals;
+  }-*/;
+
+  private static native boolean hasHashCode(Object object) /*-{
+    return !!object && !!object.hashCode;
+  }-*/;
+
+  private static native boolean callEquals(Object thisObject, Object thatObject) /*-{
+    return thisObject.equals(thatObject);
+  }-*/;
+
+  private static native int callHashCode(Object object) /*-{
+    return object.hashCode();
+  }-*/;
 }

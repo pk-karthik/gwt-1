@@ -26,6 +26,8 @@ import java.util.List;
 
 import jsinterop.annotations.JsFunction;
 import jsinterop.annotations.JsOverlay;
+import jsinterop.annotations.JsPackage;
+import jsinterop.annotations.JsProperty;
 import jsinterop.annotations.JsType;
 
 /**
@@ -1600,4 +1602,149 @@ public class Java8Test extends GWTTestCase {
           }
         }.fAsPredicate().apply());
   }
+
+  @JsFunction
+  interface JsFunctionInterface {
+    Double m();
+    @JsOverlay
+    default Double callM() {
+      return this.m();
+    }
+  }
+
+  private static native JsFunctionInterface createNative() /*-{
+    return function () { return 5; };
+  }-*/;
+  public void testJsFunction_withOverlay() {
+    JsFunctionInterface f = new JsFunctionInterface() {
+      @Override
+      public Double m() {
+        return new Double(2.0);
+      }
+    };
+    assertEquals(2, f.callM().intValue());
+    assertEquals(5, createNative().callM().intValue());
+  }
+
+  interface FunctionalExpressionBridges_I<T> {
+    T apply(T t);
+    // TODO(rluble): uncomment the line below to when bridges for default methods are created
+    // in functional expressions
+    FunctionalExpressionBridges_I<T> m(T t);
+  }
+
+  @FunctionalInterface
+  interface FunctionalExpressionBridges_J<T extends Comparable>
+      extends FunctionalExpressionBridges_I<T> {
+    T apply(T t);
+
+    // Overrides I.m() and specializes return type
+    default FunctionalExpressionBridges_J<T> m(T t) {
+      return this;
+    }
+  }
+
+  public static String identity(String s) {
+    return s;
+  }
+
+  public void testFunctionalExpressionBridges() {
+    FunctionalExpressionBridges_J<String> ann = new FunctionalExpressionBridges_J<String>() {
+      @Override
+      public String apply(String string) {
+        return string;
+      }
+    };
+
+    assertBrigdeDispatchIsCorrect(ann);
+    assertBrigdeDispatchIsCorrect((String s) -> s + "");
+    assertBrigdeDispatchIsCorrect(Java8Test::identity);
+  }
+
+  private void assertBrigdeDispatchIsCorrect(
+      FunctionalExpressionBridges_J<String> functionalExpression) {
+    assertEquals("Hello", functionalExpression.m(null).apply("Hello"));
+    assertEquals("Hello", functionalExpression.apply("Hello"));
+    assertEquals("Hello",
+        ((FunctionalExpressionBridges_I<String>) functionalExpression).apply("Hello"));
+  }
+
+  static class ClassWithAVeryLoooooooooooooooooooooooooooooooooooongName {
+    public static String m() {
+      return null;
+    }
+  }
+
+  // Regression test for bug: #9426.
+  public void testCorrectNaming() {
+    Function<String> f = ClassWithAVeryLoooooooooooooooooooooooooooooooooooongName::m;
+    assertNotNull(f);
+  }
+
+  @JsType(isNative = true)
+  interface InterfaceWithOverlay {
+
+    @JsProperty
+    int getLength();
+
+    @JsOverlay
+    default int len() {
+      return this.getLength();
+    }
+  }
+
+  @JsType(isNative = true, name = "Object", namespace = JsPackage.GLOBAL)
+  static abstract class SubclassImplementingInterfaceWithOverlay implements InterfaceWithOverlay {
+  }
+
+  // Regression test for bug: #9440
+  public void testInterfaceWithOverlayAndNativeSubclass() {
+    SubclassImplementingInterfaceWithOverlay object =
+        (SubclassImplementingInterfaceWithOverlay) (Object) new int[]{1, 2, 3};
+    assertEquals(3, object.len());
+  }
+
+  interface Producer<T> {
+    T get();
+  }
+
+  private static Producer<Object> createInnerClassProducer() {
+    class InnerClass {
+    }
+    return (Producer) InnerClass::new;
+  }
+
+  public void testLocalClassConstructorReferenceInStaticMethod() {
+    assertTrue(createInnerClassProducer().get() != null);
+  }
+
+  // NOTE: DO NOT reorder the following classes, bug  #9453 is only reproducible in certain
+  // orderings.
+  interface SubSub_SuperDefaultMethodDevirtualizationOrder
+      extends Sub_SuperDefaultMethodDevirtualizationOrder {
+    default String m() {
+      return Sub_SuperDefaultMethodDevirtualizationOrder.super.m();
+    }
+  }
+
+  interface Sub_SuperDefaultMethodDevirtualizationOrder
+      extends Super_SuperDefaultMethodDevirtualizationOrder {
+    @Override
+    default String m() {
+      return Super_SuperDefaultMethodDevirtualizationOrder.super.m();
+    }
+  }
+
+  interface Super_SuperDefaultMethodDevirtualizationOrder {
+    default String m() {
+      return "Hi";
+    }
+  }
+
+  // Regression test for bug #9453.
+  public void testDefaultMethodDevirtualizationOrder() {
+    assertEquals("Hi", new SubSub_SuperDefaultMethodDevirtualizationOrder() {
+    }.m());
+  }
 }
+

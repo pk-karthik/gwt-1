@@ -73,7 +73,9 @@ public class RuntimeConstants {
 
   public static final String OBJECT_CASTABLE_TYPE_MAP = "Object.castableTypeMap";
   public static final String OBJECT_CLAZZ = "Object.___clazz";
+  public static final String OBJECT_EQUALS = "Object.equals";
   public static final String OBJECT_GET_CLASS = "Object.getClass";
+  public static final String OBJECT_HASHCODE = "Object.hashCode";
   public static final String OBJECT_TO_STRING = "Object.toString";
   public static final String OBJECT_TYPEMARKER = "Object.typeMarker";
 
@@ -90,6 +92,7 @@ public class RuntimeConstants {
   public static final String RUNTIME_GET_CLASS_PROTOTYPE = "Runtime.getClassPrototype";
   public static final String RUNTIME_MAKE_LAMBDA_FUNCTION = "Runtime.makeLambdaFunction";
   public static final String RUNTIME_PROVIDE = "Runtime.provide";
+  public static final String RUNTIME_TO_STRING = "Runtime.toString";
   public static final String RUNTIME_TYPE_MARKER_FN = "Runtime.typeMarkerFn";
   public static final String RUNTIME_UNIQUE_ID = "Runtime.uniqueId";
 

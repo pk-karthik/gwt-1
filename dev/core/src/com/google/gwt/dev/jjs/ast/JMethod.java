@@ -172,9 +172,9 @@ public class JMethod extends JNode implements JMember, CanBeAbstract {
     if (actualJsName.isEmpty()) {
       assert !needsDynamicDispatch();
       return namespace;
-    } else if (JsInteropUtil.isGlobal(namespace)) {
+    } else if (JsInteropUtil.isGlobal(namespace) || JsInteropUtil.isWindow(namespace)) {
       assert !needsDynamicDispatch();
-      return actualJsName;
+      return namespace + "." + actualJsName;
     } else {
       return namespace + (isStatic() ? "." : ".prototype.") + actualJsName;
     }
@@ -199,13 +199,13 @@ public class JMethod extends JNode implements JMember, CanBeAbstract {
    * an existing non-JsMember inside a class.
    */
   public boolean exposesNonJsMember() {
-    if (isInterfaceMethod() || getJsMemberType() == JsMemberType.NONE) {
+    if (isInterfaceMethod() || enclosingType.isJsNative() || !JjsUtils.exposesJsName(this)) {
       return false;
     }
 
     boolean hasNonJsMemberParent = false;
     for (JMethod overriddenMethod : overriddenMethods) {
-      if (overriddenMethod.getJsMemberType() == JsMemberType.NONE) {
+      if (!JjsUtils.exposesJsName(overriddenMethod)) {
         hasNonJsMemberParent = true;
       }
       if (overriddenMethod.exposesNonJsMember()) {
@@ -227,7 +227,7 @@ public class JMethod extends JNode implements JMember, CanBeAbstract {
   }
 
   private boolean isJsFunctionMethod() {
-    return enclosingType.isJsFunction();
+    return enclosingType.isJsFunction() && isAbstract();
   }
 
   public boolean isOrOverridesJsFunctionMethod() {
@@ -241,14 +241,14 @@ public class JMethod extends JNode implements JMember, CanBeAbstract {
 
   @Override
   public boolean isJsNative() {
-    return body == null || (!isJsOverlay() && getEnclosingType().isJsNative());
+    return body == null
+        || (!isJsOverlay() && getEnclosingType().isJsNative() && !JProgram.isClinit(this));
   }
 
   @Override
   public boolean isJsOverlay() {
     return isJsOverlay
-        || getEnclosingType().isJsoType()
-        || getEnclosingType().isJsNative() && JProgram.isClinit(this);
+        || getEnclosingType().isJsoType();
   }
 
   public void setSyntheticAccidentalOverride() {
@@ -292,8 +292,8 @@ public class JMethod extends JNode implements JMember, CanBeAbstract {
     this.hasSideEffects = hasSideEffects;
   }
 
-  public void setDefaultMethod() {
-    this.defaultMethod = true;
+  public void setDefaultMethod(boolean defaultMethod) {
+    this.defaultMethod = defaultMethod;
   }
 
   @Override
@@ -644,6 +644,7 @@ public class JMethod extends JNode implements JMember, CanBeAbstract {
     return access == AccessModifier.DEFAULT.ordinal();
   }
 
+  @Override
   public boolean isExternal() {
     return getEnclosingType().isExternal();
   }

@@ -27,6 +27,7 @@ import com.google.gwt.dev.jjs.SourceOrigin;
 import com.google.gwt.dev.jjs.ast.AccessModifier;
 import com.google.gwt.dev.jjs.ast.CanHaveSuppressedWarnings;
 import com.google.gwt.dev.jjs.ast.HasJsInfo;
+import com.google.gwt.dev.jjs.ast.HasJsInfo.JsMemberType;
 import com.google.gwt.dev.jjs.ast.JArrayLength;
 import com.google.gwt.dev.jjs.ast.JArrayRef;
 import com.google.gwt.dev.jjs.ast.JArrayType;
@@ -90,6 +91,7 @@ import com.google.gwt.dev.jjs.ast.JThrowStatement;
 import com.google.gwt.dev.jjs.ast.JTryStatement;
 import com.google.gwt.dev.jjs.ast.JType;
 import com.google.gwt.dev.jjs.ast.JUnaryOperator;
+import com.google.gwt.dev.jjs.ast.JUnsafeTypeCoercion;
 import com.google.gwt.dev.jjs.ast.JVariable;
 import com.google.gwt.dev.jjs.ast.JWhileStatement;
 import com.google.gwt.dev.jjs.ast.js.JMultiExpression;
@@ -109,6 +111,7 @@ import com.google.gwt.dev.js.ast.JsParameter;
 import com.google.gwt.dev.util.StringInterner;
 import com.google.gwt.dev.util.collect.Stack;
 import com.google.gwt.thirdparty.guava.common.base.Function;
+import com.google.gwt.thirdparty.guava.common.base.Joiner;
 import com.google.gwt.thirdparty.guava.common.base.Preconditions;
 import com.google.gwt.thirdparty.guava.common.base.Predicate;
 import com.google.gwt.thirdparty.guava.common.base.Predicates;
@@ -247,13 +250,16 @@ public class GwtAstBuilder {
 
   public static final String CLINIT_METHOD_NAME = "$clinit";
   public static final String GET_CLASS_METHOD_NAME = "getClass";
+  public static final String EQUALS_METHOD_NAME = "equals";
   public static final String HAS_NEXT_METHOD_NAME = "hasNext";
+  public static final String HASHCODE_METHOD_NAME = "hashCode";
   public static final String ITERATOR_METHOD_NAME = "iterator";
   public static final String INIT_NAME_METHOD_NAME = "$init";
   public static final String NEXT_METHOD_NAME = "next";
   public static final String ORDINAL_METHOD_NAME = "ordinal";
   public static final String OUTER_LAMBDA_PARAM_NAME = "$$outer_0";
   public static final String STATIC_INIT_METHOD_NAME =  "$" + INIT_NAME_METHOD_NAME;
+  public static final String TO_STRING_METHOD_NAME = "toString";
   public static final String VALUE_OF_METHOD_NAME = "valueOf";
   public static final String VALUES_METHOD_NAME = "values";
 
@@ -1219,9 +1225,9 @@ public class GwtAstBuilder {
       // Create an inner class to implement the interface and SAM method.
       // class lambda$0$Type implements T {}
 
-      String innerLambdaClassName =
-          JdtUtil.getClassName(x.binding.declaringClass) + "$" + String.valueOf(x.binding.selector);
-      JClassType innerLambdaClass = createInnerClass(innerLambdaClassName, x, info, funcType);
+      String innerLambdaImplementationClassShortName = String.valueOf(x.binding.selector);
+      JClassType innerLambdaClass = createInnerClass(
+          curClass.getClassOrInterface(), innerLambdaImplementationClassShortName, info, funcType);
       JConstructor ctor = new JConstructor(info, innerLambdaClass, AccessModifier.PRIVATE);
 
       // locals captured by the lambda and saved as fields on the anonymous inner class
@@ -1251,11 +1257,27 @@ public class GwtAstBuilder {
       ctor.freezeParamTypes();
       samMethod.freezeParamTypes();
 
+      // Create necessary bridges.
+      createFunctionalExpressionBridges(innerLambdaClass, x, samMethod);
+
       // replace (x,y,z) -> expr with 'new Lambda(args)'
       replaceLambdaWithInnerClassAllocation(x, info, innerLambdaClass, ctor, synthArgs);
       popMethodInfo();
       // Add the newly generated type
       newTypes.add(innerLambdaClass);
+    }
+
+    private void createFunctionalExpressionBridges(
+        JClassType functionalExpressionImplementationClass,
+        FunctionalExpression functionalExpression,
+        JMethod functionalInterfaceAbstractMethod) {
+      if (functionalExpression.getRequiredBridges() != null) {
+        for (MethodBinding methodBinding : functionalExpression.getRequiredBridges()) {
+          // Create bridges.
+          createBridgeMethod(functionalExpressionImplementationClass, methodBinding,
+              functionalInterfaceAbstractMethod);
+        }
+      }
     }
 
     private void createLambdaSamMethod(LambdaExpression x, JMethod interfaceMethod, SourceInfo info,
@@ -1407,6 +1429,7 @@ public class GwtAstBuilder {
         assert capturedLocalReference != null;
         allocLambda.addArg(capturedLocalReference);
       }
+
       // put the result on the stack, and pop out synthetic method from the scope
       push(allocLambda);
     }
@@ -1446,11 +1469,12 @@ public class GwtAstBuilder {
       return ctor.createFinalParameter(info, paramName, paramType);
     }
 
-    private JClassType createInnerClass(String name, FunctionalExpression x, SourceInfo info,
-        JInterfaceType... funcType) {
-      JClassType innerLambdaClass = new JClassType(info, name + "$Type", false, true);
-      innerLambdaClass.setEnclosingType((JDeclaredType) typeMap.get(x.binding.declaringClass));
-      for (JInterfaceType type : funcType) {
+    private JClassType createInnerClass(JDeclaredType enclosingType, String shortNname,
+        SourceInfo info, JInterfaceType... superInterfaces) {
+      JClassType innerLambdaClass = new JClassType(info,
+          Joiner.on('$').join(enclosingType.getName(), shortNname, "Type"), false, true);
+      innerLambdaClass.setEnclosingType(enclosingType);
+      for (JInterfaceType type : superInterfaces) {
         innerLambdaClass.addImplements(type);
       }
       innerLambdaClass.setSuperClass(javaLangObject);
@@ -1518,24 +1542,26 @@ public class GwtAstBuilder {
           }
         }
 
-        JMethodCall call = new JMethodCall(info, receiver, method);
+        JMethodCall methodCall = new JMethodCall(info, receiver, method);
 
         // On a super ref, don't allow polymorphic dispatch. Oddly enough,
         // QualifiedSuperReference not derived from SuperReference!
         boolean isSuperRef =
             x.receiver instanceof SuperReference || x.receiver instanceof QualifiedSuperReference;
         if (isSuperRef) {
-          call.setStaticDispatchOnly();
+          methodCall.setStaticDispatchOnly();
         }
 
-        // The arguments come first...
-        call.addArgs(arguments);
+        // The arguments come first.
+        methodCall.addArgs(arguments);
 
         if (x.valueCast != null) {
-          JType castType = typeMap.get(x.valueCast);
-          push(maybeCast(castType, call));
+          JType targetType = typeMap.get(x.valueCast);
+          push(isUncheckedGenericMethodCall(x)
+              ? maybeInsertUnsafeTypeCoersion(targetType, methodCall)
+              : maybeCast(targetType, methodCall));
         } else {
-          push(call);
+          push(methodCall);
         }
       } catch (Throwable e) {
         throw translateException(x, e);
@@ -1545,7 +1571,6 @@ public class GwtAstBuilder {
     @Override
     public void endVisit(MethodDeclaration x, ClassScope scope) {
       try {
-
         if (x.isNative()) {
           processNativeMethod(x);
         } else {
@@ -1764,14 +1789,14 @@ public class GwtAstBuilder {
 
       // Constructors, overloading and generics means that the safest approach is to consider
       // each different member reference as a different lambda implementation.
-      String lambdaName =  JdtUtil.getClassName(curClass.typeDecl.binding) + "$"
-          + String.valueOf(nextReferenceExpressionId++) + "methodref$"
-          + (x.binding.isConstructor() ? "ctor" : String.valueOf(x.binding.selector));
-
+      String lambdaImplementationClassShortName =
+          String.valueOf(nextReferenceExpressionId++) + "methodref$"
+              + (x.binding.isConstructor() ? "ctor" : String.valueOf(x.binding.selector));
       List<JExpression> enclosingThisRefs = Lists.newArrayList();
 
       // Create an inner class to hold the implementation of the interface
-      JClassType innerLambdaClass = createInnerClass(lambdaName, x, info, funcType);
+      JClassType innerLambdaClass = createInnerClass(
+          curClass.getClassOrInterface(), lambdaImplementationClassShortName, info, funcType);
       newTypes.add(innerLambdaClass);
 
       JConstructor ctor = new JConstructor(info, innerLambdaClass, AccessModifier.PRIVATE);
@@ -1785,7 +1810,7 @@ public class GwtAstBuilder {
       if (hasQualifier) {
         // this.$$outer = $$outer
         JField outerField = createAndBindCapturedLambdaParameter(info, OUTER_LAMBDA_PARAM_NAME,
-            innerLambdaClass.getEnclosingType(), ctor, ctorBody);
+            referredMethod.getEnclosingType(), ctor, ctorBody);
         instance = new JFieldRef(info,
             new JThisRef(info, innerLambdaClass), outerField, innerLambdaClass);
       } else if (referredMethod instanceof JConstructor) {
@@ -1795,7 +1820,7 @@ public class GwtAstBuilder {
         // it's constructor invoked with an enclosing instance, Inner::new
         // Java8 doesn't allow the qualifified case, e.g. x.new Foo() -> x.Foo::new
         ReferenceBinding targetBinding = referredMethodBinding.declaringClass;
-        if (JdtUtil.isInnerClass(targetBinding)) {
+        if (targetBinding.syntheticEnclosingInstanceTypes() != null) {
           for (ReferenceBinding argType : targetBinding.syntheticEnclosingInstanceTypes()) {
             argType = (ReferenceBinding) argType.erasure();
             JExpression enclosingThisRef = resolveThisReference(info, argType, false, blockScope);
@@ -1879,7 +1904,9 @@ public class GwtAstBuilder {
             samBinding.parameters[paramNumber
                 + (samBinding.parameters.length - referredMethodBinding.parameters.length)];
         // if it is not the trailing param or varargs, or interface method is already varargs
-        if (varArgInitializers == null || !referredMethodBinding.isVarargs() || (paramNumber < varArg)) {
+        if (varArgInitializers == null
+            || !referredMethodBinding.isVarargs()
+            || (paramNumber < varArg)) {
           destParam = referredMethodBinding.parameters[paramNumber];
           paramExpr = boxOrUnboxExpression(paramExpr, samParameterBinding, destParam);
           samCall.addArg(paramExpr);
@@ -1915,6 +1942,8 @@ public class GwtAstBuilder {
       innerLambdaClass.addMethod(samMethod);
       ctor.freezeParamTypes();
       samMethod.freezeParamTypes();
+
+      createFunctionalExpressionBridges(innerLambdaClass, x, samMethod);
 
       JConstructor lambdaCtor = null;
       for (JMethod method : innerLambdaClass.getMethods()) {
@@ -2530,9 +2559,10 @@ public class GwtAstBuilder {
         processEnumType((JEnumType) type);
       }
 
-      if (type instanceof JClassType) {
-        addBridgeMethods(x.binding);
+      if (type instanceof JClassType && type.isJsNative()) {
+        maybeImplementJavaLangObjectMethodsOnNativeClass(type);
       }
+      addBridgeMethods(x.binding);
 
       curClass = classStack.pop();
     }
@@ -2696,15 +2726,16 @@ public class GwtAstBuilder {
      * have been installed on the GWT types.
      * </p>
      */
-    private void addBridgeMethods(SourceTypeBinding clazzBinding) {
+    private void addBridgeMethods(SourceTypeBinding classBinding) {
       /*
        * JDT adds bridge methods in all the places GWT needs them. Use JDT's
        * bridge methods.
        */
-      if (clazzBinding.syntheticMethods() != null) {
-        for (SyntheticMethodBinding synthmeth : clazzBinding.syntheticMethods()) {
-          if (synthmeth.purpose == SyntheticMethodBinding.BridgeMethod && !synthmeth.isStatic()) {
-            createBridgeMethod(synthmeth);
+      if (classBinding.syntheticMethods() != null) {
+        for (SyntheticMethodBinding syntheticMethodBinding : classBinding.syntheticMethods()) {
+          if (syntheticMethodBinding.purpose == SyntheticMethodBinding.BridgeMethod
+              && !syntheticMethodBinding.isStatic()) {
+            createBridgeMethod(syntheticMethodBinding);
           }
         }
       }
@@ -2741,35 +2772,49 @@ public class GwtAstBuilder {
       return call;
     }
 
+    private void createBridgeMethod(SyntheticMethodBinding jdtBridgeMethod) {
+      JMethod targetMethod = typeMap.get(jdtBridgeMethod.targetMethod);
+      createBridgeMethod(curClass.type, jdtBridgeMethod, targetMethod);
+    }
+
     /**
      * Create a bridge method. It calls a same-named method with the same
      * arguments, but with a different type signature.
      */
-    private void createBridgeMethod(SyntheticMethodBinding jdtBridgeMethod) {
-      JMethod implmeth = typeMap.get(jdtBridgeMethod.targetMethod);
-      SourceInfo info = implmeth.getSourceInfo();
+    private JMethod createBridgeMethod(
+        JDeclaredType enclosingType, MethodBinding sourceMethodBinding, JMethod targetMethod) {
+
+      JType returnType = typeMap.get(sourceMethodBinding.returnType);
+      Iterable<JType> parameterTypes = mapTypes(sourceMethodBinding.parameters);
+      Iterable<JClassType> thrownExceptionTypes = mapTypes(sourceMethodBinding.thrownExceptions);
+
+      SourceInfo info = targetMethod.getSourceInfo();
       JMethod bridgeMethod =
-          new JMethod(info, implmeth.getName(), curClass.type, typeMap
-              .get(jdtBridgeMethod.returnType), false, false, implmeth.isFinal(), implmeth
-              .getAccess());
-      typeMap.setMethod(jdtBridgeMethod, bridgeMethod);
+          new JMethod(info, targetMethod.getName(), enclosingType, returnType, false, false,
+              targetMethod.isFinal(), targetMethod.getAccess());
       bridgeMethod.setBody(new JMethodBody(info));
-      curClass.type.addMethod(bridgeMethod);
-      bridgeMethod.setSynthetic();
-      int paramIdx = 0;
-      List<JParameter> implParams = implmeth.getParams();
-      for (TypeBinding jdtParamType : jdtBridgeMethod.parameters) {
-        JParameter param = implParams.get(paramIdx++);
-        JType paramType = typeMap.get(jdtParamType.erasure());
-        bridgeMethod.createFinalParameter(param.getSourceInfo(), param.getName(), paramType);
+      if (enclosingType instanceof JInterfaceType) {
+        // Mark bridges created in interfaces as default methods so they are processed correctly
+        // by the rest of the pipeline.
+        bridgeMethod.setDefaultMethod(true);
       }
-      for (ReferenceBinding exceptionReference : jdtBridgeMethod.thrownExceptions) {
-        bridgeMethod.addThrownException((JClassType) typeMap.get(exceptionReference.erasure()));
+      bridgeMethod.setSynthetic();
+
+      enclosingType.addMethod(bridgeMethod);
+      int paramIndex = 0;
+      List<JParameter> implParams = targetMethod.getParams();
+      for (JType parameterType : parameterTypes) {
+        JParameter parameter = implParams.get(paramIndex++);
+        bridgeMethod.createFinalParameter(
+            parameter.getSourceInfo(), parameter.getName(), parameterType);
+      }
+      for (JClassType thrownException : thrownExceptionTypes) {
+        bridgeMethod.addThrownException(thrownException);
       }
       bridgeMethod.freezeParamTypes();
 
       // create a call and pass all arguments through, casting if necessary
-      JMethodCall call = new JMethodCall(info, makeThisRef(info), implmeth);
+      JMethodCall call = new JMethodCall(info, makeThisRef(info), targetMethod);
       for (int i = 0; i < bridgeMethod.getParams().size(); i++) {
         JParameter param = bridgeMethod.getParams().get(i);
         call.addArg(maybeCast(implParams.get(i).getType(), param.makeRef(info)));
@@ -2781,6 +2826,8 @@ public class GwtAstBuilder {
       } else {
         body.getBlock().addStmt(call.makeReturnStatement());
       }
+      typeMap.setMethod(sourceMethodBinding, bridgeMethod);
+      return bridgeMethod;
     }
 
     private void writeEnumValuesMethod(JEnumType type, JMethod method) {
@@ -2906,6 +2953,47 @@ public class GwtAstBuilder {
       }
     }
 
+    private void maybeImplementJavaLangObjectMethodsOnNativeClass(JDeclaredType type) {
+      maybeCreateSyntheticJavaLangObjectMethodNativeOverride(
+          type, EQUALS_METHOD_NAME, JPrimitiveType.BOOLEAN, javaLangObject);
+      maybeCreateSyntheticJavaLangObjectMethodNativeOverride(
+          type, HASHCODE_METHOD_NAME, JPrimitiveType.INT);
+      maybeCreateSyntheticJavaLangObjectMethodNativeOverride(
+          type, TO_STRING_METHOD_NAME, javaLangString);
+    }
+
+    private void maybeCreateSyntheticJavaLangObjectMethodNativeOverride(
+        JDeclaredType type, String name, JType returnType, JType... parameterTypes) {
+      SourceInfo info = type.getSourceInfo();
+      JMethod method =
+          new JMethod(info, name, type, returnType, false, false, false, AccessModifier.PUBLIC);
+      int i = 0;
+      for (JType parameterType : parameterTypes) {
+        method.createParameter(info, "arg" + i++, parameterType);
+      }
+      method.freezeParamTypes();
+      // Do not mark this methods as synthetic because of the risk of missing some checks in
+      // JsInteropRestrictionChecker where we skip synthetic methods in many of the checks.
+      assert (!method.isSynthetic());
+      // Creating a method without a body makes it native.
+      assert (method.isJsNative());
+      final String signature = method.getJsniSignature(false, false);
+      boolean alreadyExists = Iterables.any(type.getMethods(), new Predicate<JMethod>() {
+        @Override
+        public boolean apply(JMethod typeMethod) {
+          return typeMethod.getJsniSignature(false, false).equals(signature);
+        }
+      });
+      if (alreadyExists) {
+        return;
+      }
+      type.addMethod(method);
+      // This method is declared in a native JsType, make sure JsInfo is populated correctly, by
+      // applying the JsType rules.
+      JsInteropUtil.maybeSetJsInteropProperties(method, generateJsInteropExports);
+      assert (method.getJsMemberType() == JsMemberType.METHOD);
+    }
+
     private JDeclarationStatement makeDeclaration(SourceInfo info, JLocal local,
         JExpression value) {
       return new JDeclarationStatement(info, local.makeRef(info), value);
@@ -2982,12 +3070,20 @@ public class GwtAstBuilder {
 
     private JExpression maybeCast(JType expected, JExpression expression) {
       if (expected != expression.getType()) {
-        // Must be a generic; insert a cast operation.
-        JReferenceType toType = (JReferenceType) expected;
-        return new JCastOperation(expression.getSourceInfo(), toType, expression);
-      } else {
-        return expression;
+        // Must be a generic cast; insert a cast operation.
+        return new JCastOperation(expression.getSourceInfo(), expected, expression);
       }
+
+      return expression;
+    }
+
+      private JExpression maybeInsertUnsafeTypeCoersion(JType expected, JExpression expression) {
+      if (expected != expression.getType()) {
+        // A generic call marked as @UncheckedCast.
+        return new JUnsafeTypeCoercion(expression.getSourceInfo(), expected, expression);
+      }
+
+      return expression;
     }
 
     private JNode pop() {
@@ -3562,6 +3658,16 @@ public class GwtAstBuilder {
     }
   }
 
+  private <T extends JType> Iterable<T> mapTypes(TypeBinding[] types) {
+    return FluentIterable.from(Arrays.asList(types)).transform(
+        new Function<TypeBinding, T>() {
+          @Override
+          public T apply(TypeBinding typeBinding) {
+            return (T) typeMap.get(typeBinding.erasure());
+          }
+        });
+  }
+
   static class ClassInfo {
     public final JClassType classType;
     public final ClassScope scope;
@@ -4030,7 +4136,7 @@ public class GwtAstBuilder {
     }
 
     if (b.isDefaultMethod()) {
-      method.setDefaultMethod();
+      method.setDefaultMethod(true);
     }
 
     enclosingType.addMethod(method);
@@ -4056,26 +4162,34 @@ public class GwtAstBuilder {
     x.setSuppressedWarnings(JdtUtil.getSuppressedWarnings(annotations));
   }
 
-  private void maybeSetInliningMode(AbstractMethodDeclaration x, JMethod method) {
-    MethodBinding bind = x.binding;
-    if (JdtUtil.getAnnotation(bind, "javaemul.internal.annotations.DoNotInline") != null) {
+  private static boolean isUncheckedGenericMethodCall(MessageSend messageSend) {
+    if (messageSend.binding.genericMethod() != null) {
+      return JdtUtil.getAnnotationByName(messageSend.binding().getAnnotations(),
+              "javaemul.internal.annotations.UncheckedCast") != null;
+    }
+    return false;
+  }
+
+  private static void maybeSetInliningMode(AbstractMethodDeclaration x, JMethod method) {
+    if (JdtUtil.getAnnotationByName(
+        x.annotations, "javaemul.internal.annotations.DoNotInline") != null) {
       method.setInliningMode(InliningMode.DO_NOT_INLINE);
-    } else if (JdtUtil.getAnnotation(bind, "javaemul.internal.annotations.ForceInline") != null) {
+    } else if (JdtUtil.getAnnotationByName(
+        x.annotations, "javaemul.internal.annotations.ForceInline") != null) {
       method.setInliningMode(InliningMode.FORCE_INLINE);
     }
   }
 
-  private void maybeSetHasNoSideEffects(AbstractMethodDeclaration x,
-      JMethod method) {
-    if (JdtUtil.getAnnotation(x.binding,
-        "javaemul.internal.annotations.HasNoSideEffects") != null) {
+  private static void maybeSetHasNoSideEffects(AbstractMethodDeclaration x, JMethod method) {
+    if (JdtUtil.getAnnotationByName(
+        x.annotations, "javaemul.internal.annotations.HasNoSideEffects") != null) {
       method.setHasSideEffects(false);
     }
   }
 
   private void maybeAddMethodSpecialization(AbstractMethodDeclaration x, JMethod method) {
-    AnnotationBinding specializeAnnotation =
-        JdtUtil.getAnnotation(x.binding, "javaemul.internal.annotations.SpecializeMethod");
+    AnnotationBinding specializeAnnotation = JdtUtil.getAnnotationByName(
+        x.annotations, "javaemul.internal.annotations.SpecializeMethod");
     if (specializeAnnotation == null) {
       return;
     }
@@ -4083,17 +4197,11 @@ public class GwtAstBuilder {
     TypeBinding[] params =
         JdtUtil.getAnnotationParameterTypeBindingArray(specializeAnnotation, "params");
     assert params != null : "params is a mandatory field";
-    List<JType> paramTypes = new ArrayList<JType>();
-    for (TypeBinding pType : params) {
-      paramTypes.add(typeMap.get(pType));
-    }
+    List<JType> paramTypes = Lists.newArrayList(mapTypes(params));
 
     TypeBinding returns =
         JdtUtil.getAnnotationParameterTypeBinding(specializeAnnotation, "returns");
-    JType returnsType = null;
-    if (returns != null) {
-      returnsType = typeMap.get(returns);
-    }
+    JType returnsType = returns == null ? null : typeMap.get(returns);
 
     String targetMethod = JdtUtil.getAnnotationParameterString(specializeAnnotation, "target");
     assert targetMethod != null : "target is a mandatory parameter";

@@ -720,12 +720,10 @@ public class Java8AstTest extends FullCompileTestBase {
     assertTrue(ctor instanceof JConstructor);
     // instance capture
     assertEquals(1, ctor.getParams().size());
-    assertEquals(lambdaInnerClass.getEnclosingType(), ctor.getOriginalParamTypes().get(0));
-
     // should have 1 field to store the captured instance
     assertEquals(1, lambdaInnerClass.getFields().size());
-    assertEquals(lambdaInnerClass.getEnclosingType(),
-        lambdaInnerClass.getFields().get(0).getType());
+    assertEquals(lambdaInnerClass.getFields().get(0).getType(),
+        ctor.getOriginalParamTypes().get(0));
 
     // should extends test.Lambda
     assertTrue(lambdaInnerClass.getImplements().contains(program.getFromTypeMap("test.Lambda")));
@@ -1189,7 +1187,7 @@ public class Java8AstTest extends FullCompileTestBase {
     JMethod defaultMethod = findMethod(clazz, "method2");
     assertNotNull(defaultMethod);
     assertNotNull(defaultMethod.getBody());
-    assertEquals("{return super.method2();}",
+    assertEquals("{return this.DefaultInterface.method2();}",
         formatSource(defaultMethod.getBody().toSource()));
   }
 

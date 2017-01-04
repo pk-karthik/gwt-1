@@ -97,8 +97,7 @@ public class Runtime {
     return @Runtime::portableObjCreate(*)(superPrototype);
   }-*/;
 
-  public static native void copyObjectProperties(JavaScriptObject from,
-      JavaScriptObject to) /*-{
+  public static native void copyObjectProperties(JavaScriptObject from, JavaScriptObject to) /*-{
     for (var property in from) {
       if (to[property] === undefined) {
         to[property] = from[property];
@@ -156,18 +155,12 @@ public class Runtime {
    * Create a function that applies the specified samMethod on itself, and whose __proto__ points to
    * <code>instance</code>.
    */
-  public static native JavaScriptObject makeLambdaFunction(JavaScriptObject samMethod,
-      JavaScriptObject instance) /*-{
+  public static native JavaScriptObject makeLambdaFunction(
+      JavaScriptObject samMethod,
+      JavaScriptObject ctor,
+      JavaScriptObject ctorArguments) /*-{
     var lambda = function() { return samMethod.apply(lambda, arguments); }
-
-    if (lambda.__proto__) {
-      lambda.__proto__ = instance;
-    } else {
-      for (var prop in instance) {
-        lambda[prop] = instance[prop];
-      }
-    }
-
+    ctor.apply(lambda, ctorArguments);
     return lambda;
   }-*/;
 
@@ -218,5 +211,12 @@ public class Runtime {
       propertyDefinition[key]['configurable'] = true;
     }
     Object.defineProperties(proto,  propertyDefinition);
+  }-*/;
+
+  public static native String toString(Object object) /*-{
+    if (Array.isArray(object) && @Util::hasTypeMarker(*)(object)) {
+       return @Object::toString(Ljava/lang/Object;)(object);
+    }
+    return object.toString();
   }-*/;
 }
